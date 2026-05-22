@@ -2,36 +2,51 @@
 
 from pathlib import Path
 import pandas as pd
+from src.data.validate_data import (validate_customers, validate_articles, validate_transactions)
+
 
 RAW_DATA_DIR = Path("data/raw")
 
 
-def _load_csv(file_path: Path) -> pd.DataFrame:
-    """ Load a CSV file into a pandas DataFrame """
-    return pd.read_csv(file_path)
+def _load_data(file_path: Path) -> pd.DataFrame:
+    """ Load a parquet file into a pandas DataFrame """
+    return pd.read_parquet(file_path)
 
 def load_transactions(file_path: Path | None = None) -> pd.DataFrame:
-    """Load the transactions dataset from a CSV file"""
+    """Load the transactions dataset from a parquet file"""
     if file_path is None:
-        file_path = RAW_DATA_DIR / "transactions_train.csv" # resort to defaults
-        
-    return _load_csv(file_path)
+        file_path = RAW_DATA_DIR / "transactions_train.parquet" # resort to defaults
+
+    df = _load_data(file_path)
+    validate_transactions(df)
+
+    return df
 
 def load_articles(file_path: Path | None = None) -> pd.DataFrame:
-    """ Load the Articles from the CSV File """
+    """ Load the Articles from the parquet File """
     if file_path is None:
-        file_path = RAW_DATA_DIR / "articles.csv"
+        file_path = RAW_DATA_DIR / "articles.parquet"
 
-    return _load_csv(file_path)
+    df = _load_data(file_path)
+    validate_articles(df)
+
+    return df
 
 
 def load_customers(file_path: Path | None = None) -> pd.DataFrame:
-    """ Load the customer data from the CSV file """
+    """ Load the customer data from the parquet file """
     if file_path is None:
-        file_path = RAW_DATA_DIR / "customers.csv"
+        file_path = RAW_DATA_DIR / "customers.parquet"
     
-    return _load_csv(file_path)
+    df = _load_data(file_path)
+    validate_customers(df)
+
+    return df
 
 if __name__ == "__main__":
     transactions = load_transactions()
-    print(transactions.head())
+    articles = load_articles()
+    customers = load_customers()
+    print(f'Transactions: {transactions.shape}')
+    print(f'Articles: {articles.shape}')
+    print(f'Customers: {customers.shape}')
