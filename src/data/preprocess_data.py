@@ -13,8 +13,7 @@ def preprocess_transactions(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _fill_unknown_values(
-    df: pd.DataFrame, columns: list[str], fill_value: str = "Unknown"
-) -> pd.DataFrame:
+    df: pd.DataFrame, columns: list[str], fill_value: str = "Unknown" ) -> pd.DataFrame:
     """Fill missing values in selected categorical columns."""
     processed_df = df.copy()
     available_columns = [column for column in columns if column in processed_df.columns]
