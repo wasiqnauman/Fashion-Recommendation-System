@@ -1,6 +1,5 @@
 # Evaluation Metrics
 
-This folder contains metrics for evaluating recommender systems.
 
 Unlike normal classification problems, recommender systems care about the
 quality of a ranked list. We usually ask: "Did the useful items appear near the
