@@ -4,7 +4,7 @@ import pandas as pd
 
 
 def build_user_features(transactions: pd.DataFrame) -> pd.DataFrame:
-    """Create basic user-level interaction features."""
+    """Create basic user-level interaction features. (interaction = purchase)"""
     latest_date = transactions["t_dat"].max()
 
     user_features = (
@@ -57,3 +57,27 @@ def build_popularity_features(
         popularity_features.index + 1
     )
     return popularity_features
+
+
+def build_user_item_features(
+    candidates: pd.DataFrame,
+    user_features: pd.DataFrame,
+    item_features: pd.DataFrame,
+) -> pd.DataFrame:
+    """Attach user and item features to candidate customer-item pairs."""
+    candidate_features = candidates.merge(
+        user_features,
+        on="customer_id",
+        how="left",
+    )
+    candidate_features = candidate_features.merge(
+        item_features,
+        on="article_id",
+        how="left",
+    )
+
+    numeric_columns = candidate_features.select_dtypes(include="number").columns
+    candidate_features[numeric_columns] = candidate_features[numeric_columns].fillna(0)
+
+    return candidate_features
+
