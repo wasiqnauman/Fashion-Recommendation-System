@@ -43,15 +43,29 @@ fashion-recommender-system/
       validate_data.py
     evaluation/
       __init__.py
+      evaluate.py
+      metrics.py
     features/
       __init__.py
       build_features.py
+      candidates.py
     inference/
       __init__.py
     models/
       __init__.py
+      popularity.py
+      ranker.py
     training/
       __init__.py
+      prepare_training_data.py
+      train_baseline.py
+      train_ranker.py
+  tests/
+    conftest.py
+    test_candidates.py
+    test_metrics.py
+    test_popularity.py
+    test_ranker.py
     utils/
       __init__.py
     __init__.py
@@ -60,7 +74,7 @@ fashion-recommender-system/
   project.md
 ```
 
-The project is currently in the data and early feature-engineering stage.
+The project is currently in the baseline modeling and ranker experimentation stage.
 
 ## 3. Implemented Components
 
@@ -297,11 +311,12 @@ Implemented functions:
   - Adds `popularity_rank`.
   - Design reasoning: popularity is the simplest recommender baseline and must be beaten by more advanced models.
 
-Planned improvements:
-
 - `build_user_item_features(candidates: pd.DataFrame, user_features: pd.DataFrame, item_features: pd.DataFrame) -> pd.DataFrame`
   - Join candidate pairs to user and item feature tables.
   - Output one row per `(customer_id, article_id)` candidate.
+  - Fill missing numeric features with `0`.
+
+Planned improvements:
 
 - `add_article_metadata_features(candidate_features: pd.DataFrame, articles: pd.DataFrame) -> pd.DataFrame`
   - Join article metadata onto candidate feature rows.
@@ -309,7 +324,7 @@ Planned improvements:
 - `build_training_features(train_transactions: pd.DataFrame, candidate_pairs: pd.DataFrame, articles: pd.DataFrame, customers: pd.DataFrame) -> pd.DataFrame`
   - Build the full supervised ranking feature table.
 
-## 4. Planned Components
+## 4. Component Status And Remaining Work
 
 ### 4.1 `src/data/make_dataset.py`
 
@@ -352,7 +367,7 @@ Purpose:
 
 Generate candidate `(customer_id, article_id)` pairs before ranking.
 
-Planned functions:
+Implemented functions:
 
 - `generate_popular_candidates(train_transactions: pd.DataFrame, customers: pd.DataFrame, top_k: int = 100) -> pd.DataFrame`
   - Find the top `k` most purchased articles.
@@ -366,12 +381,11 @@ Planned functions:
 
 - `generate_user_history_candidates(train_transactions: pd.DataFrame, top_k: int = 50) -> pd.DataFrame`
   - Generate candidates from each customer's own recent purchase history.
-  - Useful as a simple personalization source.
+  - Keep each customer's most recent unique articles.
 
 - `merge_candidate_sources(candidate_frames: list[pd.DataFrame]) -> pd.DataFrame`
   - Concatenate multiple candidate sources.
   - Drop duplicate `(customer_id, article_id)` pairs.
-  - Preserve source information where possible.
 
 - `label_candidates(candidates: pd.DataFrame, validation_transactions: pd.DataFrame) -> pd.DataFrame`
   - Add binary target column `purchased`.
@@ -410,15 +424,16 @@ Purpose:
 
 Implement a non-personalized popularity recommender baseline.
 
-Planned functions:
+Implemented functions:
 
 - `fit_popularity_model(train_transactions: pd.DataFrame) -> pd.DataFrame`
   - Count purchases by `article_id`.
-  - Return sorted item popularity table.
+  - Return a sorted item popularity table with `purchase_count`, `score`, and `rank`.
 
-- `recommend_popular_items(popularity_table: pd.DataFrame, customer_ids: list[str], top_k: int = 12) -> pd.DataFrame`
+- `recommend_popular_items(popularity_table: pd.DataFrame, customer_ids: pd.Series | list[str], top_k: int = 12) -> pd.DataFrame`
   - Return top popular items for each customer.
   - Columns: `customer_id`, `article_id`, `score`, `rank`.
+  - Validate that `top_k` is positive.
 
 Design reasoning:
 
@@ -448,27 +463,33 @@ Purpose:
 
 Train and use a supervised ranking model.
 
-Planned functions:
+Implemented functions:
 
-- `train_lgbm_ranker(training_features: pd.DataFrame, feature_columns: list[str], target_column: str = "purchased")`
-  - Train a LightGBM model to predict purchase probability for each candidate pair.
+- `get_numeric_feature_columns(training_features: pd.DataFrame) -> list[str]`
+  - Select numeric feature columns.
+  - Exclude IDs, labels, candidate source, and date columns.
+
+- `train_logistic_ranker(training_features: pd.DataFrame, feature_columns: list[str], target_column: str = "purchased") -> Pipeline`
+  - Train a scikit-learn logistic regression pipeline to score candidate purchases.
+  - Use balanced class weights because purchased candidates are sparse.
+  - Raise a `ValueError` if the training labels do not contain both positive and negative examples.
 
 - `predict_scores(model, candidate_features: pd.DataFrame, feature_columns: list[str]) -> pd.DataFrame`
-  - Add model scores to candidate rows.
+  - Add purchase probability scores to candidate rows.
 
 - `rank_recommendations(scored_candidates: pd.DataFrame, top_k: int = 12) -> pd.DataFrame`
   - Sort candidates by customer and score.
   - Return top `k` items per customer.
 
 - `save_model(model, path: Path) -> None`
-  - Save model artifact using `joblib`.
+  - Save model artifact using `pickle`.
 
 - `load_model(path: Path)`
   - Load saved model artifact.
 
 Design reasoning:
 
-Use `LightGBM` for the first supervised ranking stage because it performs well on tabular features, trains quickly, and is easier to explain than a neural model.
+Use logistic regression for the first supervised ranker because it is already available through scikit-learn, fast to train on samples, and simple to debug. LightGBM remains a later upgrade once candidate generation and artifact handling are stronger.
 
 ### 4.7 `src/training/train_baseline.py`
 
@@ -476,15 +497,23 @@ Purpose:
 
 Train and evaluate baseline recommenders.
 
-Planned functions:
+Implemented functions:
 
-- `train_popularity_baseline(config_path: str | Path = "configs/config.yaml") -> None`
-  - Load processed train data.
-  - Fit popularity table.
-  - Save popularity artifact.
+- `run_popularity_baseline(top_k: int = 12)`
+  - Load and preprocess raw transactions and customers.
+  - Create a temporal train-validation split.
+  - Fit the popularity model.
+  - Recommend top popular items to validation customers.
+  - Evaluate recommendations with top-k metrics.
 
-- `main() -> None`
-  - Command-line entrypoint.
+Implemented runnable behavior:
+
+- Running `python -m src.training.train_baseline` prints popularity baseline metrics.
+
+Planned improvements:
+
+- Save the popularity artifact to `artifacts/models/popularity.parquet`.
+- Save evaluation metrics to `artifacts/reports/`.
 
 Expected output:
 
@@ -492,28 +521,51 @@ Expected output:
 artifacts/models/popularity.parquet
 ```
 
-### 4.8 `src/training/train_ranker.py`
+### 4.8 `src/training/prepare_training_data.py`
+
+Purpose:
+
+Smoke-test the labeled ranker feature pipeline.
+
+Implemented functions:
+
+- `prepare_training_data_sample(customer_sample_size: int = 1_000, candidate_top_k: int = 10) -> pd.DataFrame`
+  - Load and preprocess transactions and customers.
+  - Create a temporal train-validation split.
+  - Generate popular candidates for a customer sample.
+  - Label candidates from validation purchases.
+  - Attach user and item features.
+
+Implemented runnable behavior:
+
+- Running `python -m src.training.prepare_training_data` prints the sample feature shape, head, and label counts.
+
+### 4.9 `src/training/train_ranker.py`
 
 Purpose:
 
 Train the supervised ranking model.
 
-Planned functions:
+Implemented functions:
 
-- `prepare_ranker_training_data(config: dict) -> pd.DataFrame`
-  - Load processed train and validation data.
-  - Generate candidates.
-  - Label candidates.
-  - Build user, item, and candidate features.
+- `_sample_customer_ids(transactions: pd.DataFrame, customer_sample_size: int) -> pd.DataFrame`
+  - Select a deterministic customer sample from a transaction window.
 
-- `train_and_save_ranker(config_path: str | Path = "configs/config.yaml") -> None`
-  - Train ranking model.
-  - Save trained model.
-  - Save feature column list.
-  - Save training summary.
+- `_build_candidate_feature_table(feature_transactions: pd.DataFrame, label_transactions: pd.DataFrame, target_customers: pd.DataFrame, candidate_top_k: int) -> pd.DataFrame`
+  - Build user features, item features, popular candidates, labels, and joined candidate features for one time window.
 
-- `main() -> None`
-  - Command-line entrypoint.
+- `run_logistic_ranker_experiment(customer_sample_size: int = 5_000, candidate_top_k: int = 50, recommendation_top_k: int = 12) -> pd.DataFrame`
+  - Train a logistic ranker on one time window.
+  - Evaluate recommendations on the next time window.
+  - Return top-k metric results.
+
+Implemented runnable behavior:
+
+- Running `python -m src.training.train_ranker` prints training feature shape, label counts, evaluation feature shape, and ranker metrics.
+
+Planned improvements:
+
+- Save the trained model, feature columns, training summary, and evaluation report.
 
 Expected outputs:
 
@@ -523,13 +575,13 @@ artifacts/features/feature_columns.json
 artifacts/reports/training_summary.json
 ```
 
-### 4.9 `src/evaluation/metrics.py`
+### 4.10 `src/evaluation/metrics.py`
 
 Purpose:
 
 Implement recommender-specific evaluation metrics.
 
-Planned functions:
+Implemented functions:
 
 - `precision_at_k(recommended_items: list, relevant_items: set, k: int) -> float`
   - Fraction of top-k recommended items that are relevant.
@@ -539,9 +591,6 @@ Planned functions:
 
 - `average_precision_at_k(recommended_items: list, relevant_items: set, k: int) -> float`
   - Precision averaged at each relevant hit.
-
-- `map_at_k(recommendations: pd.DataFrame, ground_truth: pd.DataFrame, k: int) -> float`
-  - Mean average precision across users.
 
 - `dcg_at_k(recommended_items: list, relevant_items: set, k: int) -> float`
   - Discounted cumulative gain.
@@ -553,24 +602,27 @@ Design reasoning:
 
 Classification accuracy is not appropriate for recommender systems. Top-k metrics measure whether useful items appear near the top.
 
-### 4.10 `src/evaluation/evaluate.py`
+### 4.11 `src/evaluation/evaluate.py`
 
 Purpose:
 
 Evaluate recommendation outputs against validation or test purchases.
 
-Planned functions:
+Implemented functions:
 
 - `build_ground_truth(transactions: pd.DataFrame) -> pd.DataFrame`
   - Group purchased `article_id` values by `customer_id`.
 
 - `evaluate_recommendations(recommendations: pd.DataFrame, ground_truth_transactions: pd.DataFrame, k_values: list[int] = [5, 10, 12]) -> pd.DataFrame`
   - Compute recommender metrics for each `k`.
+  - Return `precision_at_k`, `recall_at_k`, `map_at_k`, and `ndcg_at_k` rows.
+
+Planned improvements:
 
 - `save_evaluation_report(metrics_df: pd.DataFrame, path: Path) -> None`
   - Save evaluation results.
 
-### 4.11 `src/training/evaluate_model.py`
+### 4.12 `src/training/evaluate_model.py`
 
 Purpose:
 
@@ -590,7 +642,7 @@ Planned functions:
 - `main() -> None`
   - Command-line entrypoint.
 
-### 4.12 `src/inference/recommender.py`
+### 4.13 `src/inference/recommender.py`
 
 Purpose:
 
@@ -617,7 +669,7 @@ Design reasoning:
 
 Inference should not be tied directly to FastAPI. Keeping it separate makes it usable in notebooks, batch jobs, tests, and the API.
 
-### 4.13 `src/inference/postprocess.py`
+### 4.14 `src/inference/postprocess.py`
 
 Purpose:
 
@@ -631,7 +683,7 @@ Planned functions:
 - `format_recommendation_response(recommendations: pd.DataFrame) -> list[dict]`
   - Convert ranked DataFrame rows into API response dictionaries.
 
-### 4.14 `src/api/schemas.py`
+### 4.15 `src/api/schemas.py`
 
 Purpose:
 
@@ -665,7 +717,7 @@ Design reasoning:
 
 Pydantic schemas make the serving interface explicit and testable.
 
-### 4.15 `src/api/dependencies.py`
+### 4.16 `src/api/dependencies.py`
 
 Purpose:
 
@@ -681,7 +733,7 @@ Design reasoning:
 
 The API should load heavy artifacts once and reuse them across requests.
 
-### 4.16 `src/api/main.py`
+### 4.17 `src/api/main.py`
 
 Purpose:
 
@@ -714,7 +766,7 @@ Planned functions:
 - `recommend_batch(request: BatchRecommendationRequest) -> list[RecommendationResponse]`
   - Serve multiple customers.
 
-### 4.17 `src/utils/config.py`
+### 4.18 `src/utils/config.py`
 
 Purpose:
 
@@ -731,7 +783,7 @@ Planned functions:
 - `resolve_path(path: str | Path) -> Path`
   - Resolve relative project paths consistently.
 
-### 4.18 `src/utils/logging.py`
+### 4.19 `src/utils/logging.py`
 
 Purpose:
 
@@ -807,6 +859,37 @@ Artifacts should be separated from source code and reproducible through training
 
 ## 6. Testing Plan
 
+Implemented tests:
+
+- `tests/conftest.py`
+  - Adds the project root to `sys.path` for local test imports.
+
+- `tests/test_candidates.py`
+  - Candidate generation returns expected columns and customer-item pairs.
+  - Recent-popular candidates come from the latest transaction window.
+  - User-history candidates keep each customer's most recent unique items.
+  - Merged candidates contain no duplicate `(customer_id, article_id)` pairs.
+  - Empty candidate source lists raise `ValueError`.
+  - Labeled candidates correctly mark known validation purchases.
+
+- `tests/test_metrics.py`
+  - Precision, recall, average precision, and NDCG match hand-computed examples.
+  - Empty relevant sets return `0.0`.
+  - Non-positive `k` raises `ValueError`.
+
+- `tests/test_popularity.py`
+  - Popularity model output is sorted by purchase count.
+  - Popular recommendations repeat top items for each unique customer.
+  - Non-positive `top_k` raises `ValueError`.
+
+- `tests/test_ranker.py`
+  - Numeric feature selection excludes IDs, labels, sources, and dates.
+  - Ranker training rejects single-class labels.
+  - Recommendations are sorted per customer and limited to top `k`.
+  - Non-positive `top_k` raises `ValueError`.
+
+Planned tests:
+
 ### `tests/test_validate_data.py`
 
 Tests:
@@ -840,20 +923,6 @@ Tests:
 - item feature output contains expected columns.
 - popularity features are sorted descending.
 - popularity rank starts at 1.
-
-### `tests/test_candidates.py`
-
-Tests:
-
-- candidate generation returns expected columns.
-- merged candidates contain no duplicate `(customer_id, article_id)` pairs.
-- labeled candidates correctly mark known validation purchases.
-
-### `tests/test_metrics.py`
-
-Tests:
-
-- precision, recall, MAP, and NDCG match hand-computed examples.
 
 ### `tests/test_api.py`
 
@@ -949,18 +1018,18 @@ docker compose up --build
 
 Recommended implementation order:
 
-1. Finish candidate generation in `src/features/candidates.py`.
-2. Extend `src/features/build_features.py` with candidate-level training features.
-3. Add recommender metrics in `src/evaluation/metrics.py`.
-4. Build the popularity baseline in `src/models/popularity.py`.
-5. Evaluate the baseline.
-6. Train the LightGBM ranker.
-7. Build inference utilities.
-8. Build the FastAPI service.
-9. Add tests.
-10. Add Docker and documentation polish.
+1. Use multiple candidate sources in ranker training and evaluation.
+2. Add article/customer metadata features to candidate feature tables.
+3. Save baseline and ranker artifacts from training scripts.
+4. Add configuration loading and project path resolution.
+5. Build inference utilities with popularity fallback.
+6. Build the FastAPI service.
+7. Add persisted evaluation reports.
+8. Consider upgrading the logistic ranker to LightGBM.
+9. Add Docker and command shortcuts.
+10. Keep tests and documentation aligned as each component changes.
 
-This order is chosen because it builds skill progressively: data first, features second, baselines third, supervised ranking fourth, production serving last.
+This order starts from the current repo state: data loading, preprocessing, splitting, multiple candidate generators, candidate labeling, basic features, metrics, a popularity baseline, and a logistic ranker experiment already exist. The next priority is using the richer candidates in training, then turning those experiments into reusable artifacts and inference paths.
 
 ## 10. Acceptance Criteria
 
@@ -980,4 +1049,3 @@ The project is complete when:
 - tests pass with `pytest`.
 - Docker starts the API successfully.
 - README and docs explain the project clearly.
-

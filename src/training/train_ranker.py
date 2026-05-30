@@ -11,7 +11,13 @@ from src.features.build_features import (
     build_user_features,
     build_user_item_features,
 )
-from src.features.candidates import generate_popular_candidates, label_candidates
+from src.features.candidates import (
+    generate_popular_candidates,
+    generate_recent_popular_candidates,
+    generate_user_history_candidates,
+    label_candidates,
+    merge_candidate_sources,
+)
 from src.models.ranker import (
     get_numeric_feature_columns,
     predict_scores,
@@ -41,10 +47,28 @@ def _build_candidate_feature_table(
     user_features = build_user_features(feature_transactions)
     item_features = build_item_features(feature_transactions)
 
-    candidates = generate_popular_candidates(
+    popular_candidates = generate_popular_candidates(
         train_transactions=feature_transactions,
         customers=target_customers,
         top_k=candidate_top_k,
+    )
+    recent_popular_candidates = generate_recent_popular_candidates(
+        train_transactions=feature_transactions,
+        customers=target_customers,
+        top_k=candidate_top_k,
+    )
+    user_history_candidates = generate_user_history_candidates(
+        train_transactions=feature_transactions[
+            feature_transactions["customer_id"].isin(target_customers["customer_id"])
+        ],
+        top_k=candidate_top_k,
+    )
+    candidates = merge_candidate_sources(
+        [
+            popular_candidates,
+            recent_popular_candidates,
+            user_history_candidates,
+        ]
     )
     labeled_candidates = label_candidates(candidates, label_transactions)
 
